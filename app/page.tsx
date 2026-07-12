@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import indonesiaMap from "indonesia-geodata/indonesiaMedium.js";
+import indonesiaMap from "indonesia-geodata/indonesiaLow.js";
 
 type Province = {
   name: string; code: string; island: string; capital: string;
@@ -83,19 +83,25 @@ export default function Home(){
   const [view,setView]=useState({x:0,y:0,scale:1});
   const [isDragging,setIsDragging]=useState(false);
   const mapRef=useRef<SVGSVGElement>(null);
+  const groupRef=useRef<SVGGElement>(null);
+  const viewRef=useRef(view);
+  const draggingRef=useRef(false);
+  const frameRef=useRef<number|null>(null);
   const drag=useRef({clientX:0,clientY:0,x:0,y:0,moved:false,provinceCode:null as string|null});
   const matches=useMemo(()=>provinces.filter(p=>p.name.toLowerCase().includes(query.toLowerCase())),[query]);
   const choose=(p:Province)=>{setSelected(p);setQuery("")};
   const toggleTheme=()=>setDarkMode(value=>{const next=!value;localStorage.setItem("nusadata-theme",next?"dark":"light");return next});
-  const zoom=(factor:number)=>setView(v=>{const scale=Math.min(5,Math.max(1,v.scale*factor));const ratio=scale/v.scale;return {scale,x:500-(500-v.x)*ratio,y:195-(195-v.y)*ratio}});
-  const resetMap=()=>setView({x:0,y:0,scale:1});
+  const applyTransform=(next:{x:number;y:number;scale:number})=>groupRef.current?.setAttribute("transform",`translate(${next.x} ${next.y}) scale(${next.scale})`);
+  const commitView=(next:{x:number;y:number;scale:number})=>{viewRef.current=next;setView(next);applyTransform(next)};
+  const zoom=(factor:number)=>{const current=viewRef.current;const scale=Math.min(5,Math.max(1,current.scale*factor));const ratio=scale/current.scale;commitView({scale,x:500-(500-current.x)*ratio,y:195-(195-current.y)*ratio})};
+  const resetMap=()=>commitView({x:0,y:0,scale:1});
   useEffect(()=>{
     const map=mapRef.current;
     if(!map)return;
     const handleWheel=(event:WheelEvent)=>{
       event.preventDefault();
       const factor=event.deltaY<0?1.18:.85;
-      setView(v=>{const scale=Math.min(5,Math.max(1,v.scale*factor));const ratio=scale/v.scale;return {scale,x:500-(500-v.x)*ratio,y:195-(195-v.y)*ratio}});
+      zoom(factor);
     };
     map.addEventListener("wheel",handleWheel,{passive:false});
     return ()=>map.removeEventListener("wheel",handleWheel);
@@ -116,13 +122,13 @@ export default function Home(){
         <div className={`map ${isDragging?"dragging":""}`} role="group" aria-label="Peta geografis 38 provinsi Indonesia">
           <div className="oceanLabel label1">LAUT JAWA</div><div className="oceanLabel label2">LAUT BANDA</div>
           <svg ref={mapRef} className="geoMap" viewBox="0 0 1000 390" role="img" aria-labelledby="mapTitle mapDesc"
-            onPointerDown={e=>{if(e.button!==0)return;const provinceCode=(e.target as SVGElement).getAttribute("data-province");e.currentTarget.setPointerCapture(e.pointerId);drag.current={clientX:e.clientX,clientY:e.clientY,x:view.x,y:view.y,moved:false,provinceCode};setIsDragging(true)}}
-            onPointerMove={e=>{if(!isDragging||!mapRef.current)return;const rect=mapRef.current.getBoundingClientRect();const dx=(e.clientX-drag.current.clientX)*(1000/rect.width);const dy=(e.clientY-drag.current.clientY)*(390/rect.height);if(Math.abs(dx)+Math.abs(dy)>3)drag.current.moved=true;setView(v=>({...v,x:drag.current.x+dx,y:drag.current.y+dy}))}}
-            onPointerUp={e=>{if(!drag.current.moved&&drag.current.provinceCode){const province=provinces.find(p=>p.code===drag.current.provinceCode);if(province)choose(province)}if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);setIsDragging(false);drag.current.moved=false;drag.current.provinceCode=null}}
-            onPointerCancel={()=>{setIsDragging(false);drag.current.moved=false;drag.current.provinceCode=null}}>
+            onPointerDown={e=>{if(e.button!==0)return;const provinceCode=(e.target as SVGElement).getAttribute("data-province");const current=viewRef.current;e.currentTarget.setPointerCapture(e.pointerId);draggingRef.current=true;drag.current={clientX:e.clientX,clientY:e.clientY,x:current.x,y:current.y,moved:false,provinceCode};setIsDragging(true)}}
+            onPointerMove={e=>{if(!draggingRef.current||!mapRef.current)return;const rect=mapRef.current.getBoundingClientRect();const dx=(e.clientX-drag.current.clientX)*(1000/rect.width);const dy=(e.clientY-drag.current.clientY)*(390/rect.height);if(Math.abs(dx)+Math.abs(dy)>3)drag.current.moved=true;const next={...viewRef.current,x:drag.current.x+dx,y:drag.current.y+dy};viewRef.current=next;if(frameRef.current===null)frameRef.current=requestAnimationFrame(()=>{applyTransform(viewRef.current);frameRef.current=null})}}
+            onPointerUp={e=>{draggingRef.current=false;commitView(viewRef.current);if(!drag.current.moved&&drag.current.provinceCode){const province=provinces.find(p=>p.code===drag.current.provinceCode);if(province)choose(province)}if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);setIsDragging(false);drag.current.moved=false;drag.current.provinceCode=null}}
+            onPointerCancel={e=>{draggingRef.current=false;commitView(viewRef.current);if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);setIsDragging(false);drag.current.moved=false;drag.current.provinceCode=null}}>
             <title id="mapTitle">Peta provinsi Indonesia</title>
             <desc id="mapDesc">Peta geografis interaktif dengan batas 38 provinsi.</desc>
-            <g transform={`translate(${view.x} ${view.y}) scale(${view.scale})`}>
+            <g ref={groupRef} transform={`translate(${view.x} ${view.y}) scale(${view.scale})`}>
             {(indonesiaMap.features as unknown as MapFeature[]).map(feature=>{
               const code=feature.properties.id.replace("ID-","");
               const province=provinces.find(p=>p.code===code);
