@@ -59,7 +59,13 @@ const stats2026:Record<string,[number,number,number,number,number]>={
 const fmt=(value:number,digits=1)=>value.toLocaleString("id-ID",{minimumFractionDigits:digits,maximumFractionDigits:digits});
 const provinces:Province[]=raw.map(p=>{const [population,growth,density,share,sexRatio]=stats2026[p.code];return {...p,population:population>=1000?`${fmt(population/1000,2)} juta`:`${fmt(population,1)} ribu`,growth:`${fmt(growth,2)}%`,density:`${density.toLocaleString("id-ID")} /km²`,share:`${fmt(share,2)}%`,sexRatio:fmt(sexRatio,1)}});
 
-const colors=["#24a985","#37c6ad","#ffb45b","#ef6d5b","#f7d65b"];
+const densityColors={low:"#b7d7f6",medium:"#5d9fe5",high:"#24528f"};
+const densityColor=(province:Province)=>{
+  const density=stats2026[province.code][2];
+  if(density>=1000)return densityColors.high;
+  if(density>=250)return densityColors.medium;
+  return densityColors.low;
+};
 
 type Ring = number[][];
 type MapFeature = {id:string;properties:{name:string;id:string};geometry:{type:"Polygon"|"MultiPolygon";coordinates:Ring[]|Ring[][]}};
@@ -73,12 +79,14 @@ const featurePath=(feature:MapFeature)=>{
 export default function Home(){
   const [selected,setSelected]=useState(provinces[11]);
   const [query,setQuery]=useState("");
+  const [darkMode,setDarkMode]=useState(false);
   const [view,setView]=useState({x:0,y:0,scale:1});
   const [isDragging,setIsDragging]=useState(false);
   const mapRef=useRef<SVGSVGElement>(null);
   const drag=useRef({clientX:0,clientY:0,x:0,y:0,moved:false,provinceCode:null as string|null});
   const matches=useMemo(()=>provinces.filter(p=>p.name.toLowerCase().includes(query.toLowerCase())),[query]);
   const choose=(p:Province)=>{setSelected(p);setQuery("")};
+  const toggleTheme=()=>setDarkMode(value=>{const next=!value;localStorage.setItem("nusadata-theme",next?"dark":"light");return next});
   const zoom=(factor:number)=>setView(v=>{const scale=Math.min(5,Math.max(1,v.scale*factor));const ratio=scale/v.scale;return {scale,x:500-(500-v.x)*ratio,y:195-(195-v.y)*ratio}});
   const resetMap=()=>setView({x:0,y:0,scale:1});
   useEffect(()=>{
@@ -92,17 +100,10 @@ export default function Home(){
     map.addEventListener("wheel",handleWheel,{passive:false});
     return ()=>map.removeEventListener("wheel",handleWheel);
   },[]);
-  return <main>
-    <header className="topbar">
-      <a className="brand" href="#"><span className="brandmark">N</span><span>NusaData<small>DEMOGRAFI INDONESIA</small></span></a>
-      <nav><a href="#jelajah" className="active">Jelajah</a><a href="#wawasan">Wawasan</a><a href="#tentang">Tentang data</a></nav>
-      <button className="year">Data 2026 <span>✓</span></button>
-    </header>
-
-    <section className="hero" id="jelajah">
-      <div className="eyebrow"><span></span> MENGENAL INDONESIA LEWAT DATA</div>
-      <h1>38 provinsi.<br/><em>Ribuan cerita.</em></h1>
-      <p>Jelajahi denyut demografi Indonesia—dari kepadatan kota hingga bentang kepulauan.</p>
+  useEffect(()=>{setDarkMode(localStorage.getItem("nusadata-theme")==="dark")},[]);
+  return <main className={darkMode?"dark":""}>
+    <section className="hero searchOnly" id="jelajah">
+      <button className="themeToggle" onClick={toggleTheme} aria-label={darkMode?"Aktifkan mode terang":"Aktifkan mode gelap"} aria-pressed={darkMode}>{darkMode?"☀":"☾"}</button>
       <div className="searchWrap">
         <span className="searchIcon">⌕</span><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Cari provinsi..." aria-label="Cari provinsi"/>
         {query && <div className="results">{matches.slice(0,6).map(p=><button key={p.code} onClick={()=>choose(p)}>{p.name}<span>{p.capital}</span></button>)}</div>}
@@ -126,7 +127,7 @@ export default function Home(){
               const code=feature.properties.id.replace("ID-","");
               const province=provinces.find(p=>p.code===code);
               if(!province)return null;
-              return <path key={feature.id} data-province={province.code} d={featurePath(feature)} className={`geoProvince ${selected.code===province.code?"selected":""}`} style={{fill:colors[province.color]}} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();choose(province)}}} tabIndex={0} role="button" aria-label={`${province.name}, ibu kota ${province.capital}`}><title>{province.name}</title></path>
+              return <path key={feature.id} data-province={province.code} d={featurePath(feature)} className={`geoProvince ${selected.code===province.code?"selected":""}`} style={{fill:densityColor(province)}} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();choose(province)}}} tabIndex={0} role="button" aria-label={`${province.name}, ibu kota ${province.capital}`}><title>{province.name}</title></path>
             })}
             </g>
           </svg>
@@ -134,7 +135,7 @@ export default function Home(){
           <div className="zoomLevel">{Math.round(view.scale*100)}%</div>
           <div className="compass">N<span>↑</span></div>
         </div>
-        <div className="legend"><span>Kepadatan</span><i style={{background:colors[0]}}></i> Rendah <i style={{background:colors[2]}}></i> Sedang <i style={{background:colors[3]}}></i> Tinggi</div>
+        <div className="legend"><span>Kepadatan</span><i style={{background:densityColors.low}}></i> &lt;250/km² <i style={{background:densityColors.medium}}></i> 250–999/km² <i style={{background:densityColors.high}}></i> ≥1.000/km²</div>
       </div>
 
       <aside className="detail" aria-live="polite">
@@ -150,7 +151,6 @@ export default function Home(){
       </aside>
     </section>
 
-    <section className="insight" id="wawasan"><div><span>ANGKA HARI INI</span><strong>58,6%</strong><p>penduduk Indonesia tinggal di kawasan perkotaan.</p></div><blockquote>“Setiap titik di peta adalah rumah, perjalanan, dan masa depan.”</blockquote></section>
-    <footer id="tentang"><span>NusaData · Prototipe visual demografi</span><span>Data bersifat ilustratif untuk kebutuhan desain</span></footer>
+    <footer id="tentang"><span>NusaData · Demografi Indonesia</span><span>Proyeksi penduduk BPS 2026 · Hasil SP2020</span></footer>
   </main>
 }
